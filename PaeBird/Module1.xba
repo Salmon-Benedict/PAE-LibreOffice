@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
+<script:module xmlns:script="http://openoffice.org/2000/script"
+               script:name="Module1"
+               script:language="StarBasic">
+Sub ShowPaeBirdSettings()
+    Dim sConfigDir As String
+    Dim sConfigFile As String
+    Dim sCurrentKey As String
+    Dim sNewKey As String
+    Dim iFile As Integer
+
+    sConfigDir = Environ("HOME") &amp; "/.config/paebird"
+    sConfigFile = sConfigDir &amp; "/key.txt"
+
+    ' Read current key
+    sCurrentKey = ""
+    On Error GoTo ReadFailed
+    iFile = FreeFile()
+    Open sConfigFile For Input As #iFile
+    Line Input #iFile, sCurrentKey
+    Close #iFile
+    sCurrentKey = Trim(sCurrentKey)
+    ReadFailed:
+    On Error GoTo 0
+
+    Dim sPrompt As String
+    If sCurrentKey = "" Or sCurrentKey = "pae-free-public-2026" Then
+        sPrompt = "You are using the free tier (50 operations/day)." &amp; Chr(13) &amp; Chr(13) &amp; _
+                  "Paste your paid API key below, or visit:" &amp; Chr(13) &amp; _
+                  "https://salmon-benedict.github.io/pae-bird-landing/register.html" &amp; Chr(13) &amp; Chr(13) &amp; _
+                  "Leave blank to keep using the free tier."
+    Else
+        sPrompt = "Current key: " &amp; Left(sCurrentKey, 8) &amp; "..." &amp; Chr(13) &amp; Chr(13) &amp; _
+                  "Paste a new key to replace it, or leave blank to keep the current key."
+    End If
+
+    sNewKey = InputBox(sPrompt, "PAE Bird Settings")
+
+    ' Cancelled
+    If IsNull(sNewKey) Or IsEmpty(sNewKey) Then Exit Sub
+
+    sNewKey = Trim(sNewKey)
+
+    ' Create config dir if needed
+    If Dir(sConfigDir, 16) = "" Then MkDir sConfigDir
+
+    ' Clear key = revert to free tier
+    If sNewKey = "" Then
+        Kill sConfigFile
+        MsgBox "Reverted to free tier.", 64, "PAE Bird"
+        Exit Sub
+    End If
+
+    ' Save new key
+    iFile = FreeFile()
+    Open sConfigFile For Output As #iFile
+    Print #iFile, sNewKey
+    Close #iFile
+
+    MsgBox "API key saved. Reload your spreadsheet for it to take effect.", 64, "PAE Bird"
+End Sub
+</script:module>

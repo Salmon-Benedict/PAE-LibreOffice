@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:component-data xmlns:oor="http://openoffice.org/2001/registry"
+                    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                    oor:name="Addons"
+                    oor:package="org.openoffice.Office">
+  <node oor:name="AddonUI">
+    <node oor:name="OfficeMenuBarMerging">
+      <node oor:name="com.paebird" oor:op="replace">
+        <node oor:name="M1" oor:op="replace">
+          <prop oor:name="MergePoint">
+            <value>.uno:ToolsMenu</value>
+          </prop>
+          <prop oor:name="MergeCommand">
+            <value>AddAfter</value>
+          </prop>
+          <prop oor:name="MergeFallback">
+            <value>AddAfter</value>
+          </prop>
+          <prop oor:name="MergeContext">
+            <value/>
+          </prop>
+          <node oor:name="MenuItems">
+            <node oor:name="N1" oor:op="replace">
+              <prop oor:name="URL">
+                <value>macro:///PaeBird.Module1.ShowPaeBirdSettings</value>
+              </prop>
+              <prop oor:name="Title">
+                <value xml:lang="en-US">PAE Bird Settings...</value>
+              </prop>
+              <prop oor:name="Target">
+                <value>_self</value>
+              </prop>
+            </node>
+          </node>
+        </node>
+      </node>
+    </node>
+  </node>
+</oor:component-data>

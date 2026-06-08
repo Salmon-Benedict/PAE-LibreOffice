@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<description xmlns="http://openoffice.org/extensions/description/2006"
+             xmlns:xlink="http://www.w3.org/1999/xlink">
+  <identifier value="com.paebird.calcaddin"/>
+  <version value="1.0.0"/>
+  <display-name>
+    <name lang="en">PAE Bird</name>
+  </display-name>
+  <publisher>
+    <name xlink:href="https://salmon-benedict.github.io/pae-bird-landing/" lang="en">PAE Bird</name>
+  </publisher>
+  <extension-description>
+    <src xlink:href="description-en.txt" lang="en"/>
+  </extension-description>
+  <dependencies>
+    <OpenOffice.org-minimal-version value="4.0" d:name="OpenOffice.org 4.0"
+      xmlns:d="http://openoffice.org/extensions/description/2006"/>
+  </dependencies>
+</description>

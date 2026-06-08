@@ -1,0 +1,13 @@
+PAE Bird adds five polynomial algebra functions to LibreOffice Calc:
+
+  =PAE_SOLVE("x^2 - 5x + 6 = 0")       → x = 3, x = 2
+  =PAE_EXPAND("(2x-1)^3")               → 8x^3 - 12x^2 + 6x - 1
+  =PAE_FACTOR("2x^2 + 6x + 4")          → 2 * (x + 1)(x + 2)
+  =PAE_DIFFERENTIATE("x^3 + 2x", "x")   → 3x^2 + 2
+  =PAE_INTEGRATE("3x^2", "x")           → x^3
+
+Works out of the box — no setup required. A free tier is included.
+For unlimited operations, get a paid key at:
+https://salmon-benedict.github.io/pae-bird-landing/register.html
+
+To enter your paid key: Tools → PAE Bird Settings...
