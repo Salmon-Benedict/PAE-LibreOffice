@@ -1,19 +1,85 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
-<script:module xmlns:script="http://openoffice.org/2000/script"
-               script:name="Module1"
-               script:language="StarBasic">
+<script:module xmlns:script="http://openoffice.org/2000/script" script:name="Module1" script:language="StarBasic"><![CDATA[
+Const PAE_API_URL = "https://pae-api-production.up.railway.app"
+Const PAE_FREE_KEY = "pae-free-public-2026"
+
+Function PAEGetKey() As String
+    Dim sPath As String
+    sPath = Environ("HOME") & "/.config/paebird/key.txt"
+    If FileExists(sPath) Then
+        Dim iFile As Integer
+        Dim sKey As String
+        iFile = FreeFile()
+        Open sPath For Input As #iFile
+        Line Input #iFile, sKey
+        Close #iFile
+        sKey = Trim(sKey)
+        If sKey <> "" Then : PAEGetKey = sKey : Exit Function : End If
+    End If
+    PAEGetKey = PAE_FREE_KEY
+End Function
+
+Function PAECallAPI(sEndpoint As String, sJSON As String) As String
+    Dim iFile As Integer
+    iFile = FreeFile()
+    Open "/tmp/pae_payload.json" For Output As #iFile
+    Print #iFile, sJSON
+    Close #iFile
+    iFile = FreeFile()
+    Open "/tmp/pae_call.sh" For Output As #iFile
+    Print #iFile, "#!/bin/bash"
+    Print #iFile, "/usr/bin/curl -s -X POST '" & PAE_API_URL & "/" & sEndpoint & "' -H 'Content-Type: application/json' -H 'x-api-key: " & PAEGetKey() & "' --data @/tmp/pae_payload.json -o /tmp/pae_result.json"
+    Close #iFile
+    Shell "/bin/bash", 1, "/tmp/pae_call.sh", True
+    Dim sLine As String, sResult As String
+    iFile = FreeFile()
+    Open "/tmp/pae_result.json" For Input As #iFile
+    Do While Not EOF(iFile)
+        Line Input #iFile, sLine
+        sResult = sResult & sLine
+    Loop
+    Close #iFile
+    Dim n As Long, e As Long
+    n = InStr(sResult, """result"":""")
+    If n > 0 Then
+        n = n + 10
+        e = InStr(n, sResult, """")
+        If e > n Then : PAECallAPI = Mid(sResult, n, e - n) : Exit Function : End If
+    End If
+    PAECallAPI = "Error: " & sResult
+End Function
+
+Function PAE_SOLVE(expression As String) As String
+    PAE_SOLVE = PAECallAPI("solve", "{""expression"":""" & expression & """}")
+End Function
+
+Function PAE_EXPAND(expression As String) As String
+    PAE_EXPAND = PAECallAPI("expand", "{""expression"":""" & expression & """}")
+End Function
+
+Function PAE_FACTOR(expression As String) As String
+    PAE_FACTOR = PAECallAPI("factor", "{""expression"":""" & expression & """}")
+End Function
+
+Function PAE_DIFFERENTIATE(expression As String, Optional variable As String) As String
+    If IsMissing(variable) Then variable = "x"
+    PAE_DIFFERENTIATE = PAECallAPI("differentiate", "{""expression"":""" & expression & """,""variable"":""" & variable & """}")
+End Function
+
+Function PAE_INTEGRATE(expression As String, Optional variable As String) As String
+    If IsMissing(variable) Then variable = "x"
+    PAE_INTEGRATE = PAECallAPI("integrate", "{""expression"":""" & expression & """,""variable"":""" & variable & """}")
+End Function
+
 Sub ShowPaeBirdSettings()
     Dim sConfigDir As String
     Dim sConfigFile As String
     Dim sCurrentKey As String
     Dim sNewKey As String
     Dim iFile As Integer
-
-    sConfigDir = Environ("HOME") &amp; "/.config/paebird"
-    sConfigFile = sConfigDir &amp; "/key.txt"
-
-    ' Read current key
+    sConfigDir = Environ("HOME") & "/.config/paebird"
+    sConfigFile = sConfigDir & "/key.txt"
     sCurrentKey = ""
     On Error GoTo ReadFailed
     iFile = FreeFile()
@@ -23,41 +89,29 @@ Sub ShowPaeBirdSettings()
     sCurrentKey = Trim(sCurrentKey)
     ReadFailed:
     On Error GoTo 0
-
     Dim sPrompt As String
-    If sCurrentKey = "" Or sCurrentKey = "pae-free-public-2026" Then
-        sPrompt = "You are using the free tier (50 operations/day)." &amp; Chr(13) &amp; Chr(13) &amp; _
-                  "Paste your paid API key below, or visit:" &amp; Chr(13) &amp; _
-                  "https://salmon-benedict.github.io/pae-bird-landing/register.html" &amp; Chr(13) &amp; Chr(13) &amp; _
+    If sCurrentKey = "" Or sCurrentKey = PAE_FREE_KEY Then
+        sPrompt = "You are using the free tier (50 operations/day)." & Chr(13) & Chr(13) & _
+                  "Paste your paid API key below, or visit:" & Chr(13) & _
+                  "https://salmon-benedict.github.io/pae-bird-landing/register.html" & Chr(13) & Chr(13) & _
                   "Leave blank to keep using the free tier."
     Else
-        sPrompt = "Current key: " &amp; Left(sCurrentKey, 8) &amp; "..." &amp; Chr(13) &amp; Chr(13) &amp; _
+        sPrompt = "Current key: " & Left(sCurrentKey, 8) & "..." & Chr(13) & Chr(13) & _
                   "Paste a new key to replace it, or leave blank to keep the current key."
     End If
-
     sNewKey = InputBox(sPrompt, "PAE Bird Settings")
-
-    ' Cancelled
     If IsNull(sNewKey) Or IsEmpty(sNewKey) Then Exit Sub
-
     sNewKey = Trim(sNewKey)
-
-    ' Create config dir if needed
     If Dir(sConfigDir, 16) = "" Then MkDir sConfigDir
-
-    ' Clear key = revert to free tier
     If sNewKey = "" Then
         Kill sConfigFile
         MsgBox "Reverted to free tier.", 64, "PAE Bird"
         Exit Sub
     End If
-
-    ' Save new key
     iFile = FreeFile()
     Open sConfigFile For Output As #iFile
     Print #iFile, sNewKey
     Close #iFile
-
     MsgBox "API key saved. Reload your spreadsheet for it to take effect.", 64, "PAE Bird"
 End Sub
-</script:module>
+]]></script:module>
