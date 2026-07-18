@@ -4,17 +4,7 @@ import urllib.request
 import urllib.error
 import unohelper
 
-with open('/tmp/paebird_loaded.txt', 'w') as _f:
-    _f.write('loaded')
-
-try:
-    from com.sun.star.sheet import XAddIn
-    with open('/tmp/paebird_loaded.txt', 'a') as _f:
-        _f.write('\nXAddIn imported OK')
-except Exception as _e:
-    with open('/tmp/paebird_loaded.txt', 'a') as _f:
-        _f.write(f'\nXAddIn import FAILED: {_e}')
-    raise
+from com.sun.star.sheet import XAddIn
 
 FREE_API_KEY = "pae-free-public-2026"
 API_URL = "https://pae-api-production.up.railway.app"
@@ -125,6 +115,3 @@ g_ImplementationHelper.addImplementation(
     "com.paebird.PaeBirdAddin",
     ("com.sun.star.sheet.AddIn",),
 )
-
-with open('/tmp/paebird_loaded.txt', 'a') as _f:
-    _f.write('\ng_ImplementationHelper registered OK')
