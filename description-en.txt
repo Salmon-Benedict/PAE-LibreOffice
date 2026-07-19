@@ -8,6 +8,6 @@ PAE Bird adds five polynomial algebra functions to LibreOffice Calc:
 
 Works out of the box — no setup required. A free tier is included.
 For unlimited operations, get a paid key at:
-https://salmon-benedict.github.io/pae-bird-landing/register.html
+https://paebird.com/register.html
 
 To enter your paid key: Tools → PAE Bird Settings...

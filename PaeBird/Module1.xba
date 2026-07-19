@@ -93,7 +93,7 @@ Sub ShowPaeBirdSettings()
     If sCurrentKey = "" Or sCurrentKey = PAE_FREE_KEY Then
         sPrompt = "You are using the free tier (50 operations/day)." & Chr(13) & Chr(13) & _
                   "Paste your paid API key below, or visit:" & Chr(13) & _
-                  "https://salmon-benedict.github.io/pae-bird-landing/register.html" & Chr(13) & Chr(13) & _
+                  "https://paebird.com/register.html" & Chr(13) & Chr(13) & _
                   "Leave blank to keep using the free tier."
     Else
         sPrompt = "Current key: " & Left(sCurrentKey, 8) & "..." & Chr(13) & Chr(13) & _

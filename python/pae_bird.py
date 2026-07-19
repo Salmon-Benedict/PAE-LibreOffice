@@ -8,7 +8,7 @@ from com.sun.star.sheet import XAddIn
 
 FREE_API_KEY = "pae-free-public-2026"
 API_URL = "https://pae-api-production.up.railway.app"
-UPGRADE_URL = "https://salmon-benedict.github.io/pae-bird-landing/register.html"
+UPGRADE_URL = "https://paebird.com/register.html"
 
 def _config_path():
     config_dir = os.path.join(os.path.expanduser("~"), ".config", "paebird")
