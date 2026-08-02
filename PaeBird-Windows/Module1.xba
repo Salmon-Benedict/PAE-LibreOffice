@@ -1,0 +1,402 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
+<script:module xmlns:script="http://openoffice.org/2000/script" script:name="Module1" script:language="StarBasic"><![CDATA[
+' Served LOCALLY by PAE Bird.exe now (see PAEBird-Windows's local_server.rs/
+' cert_manager.rs), not the internet -- no API key needed for a
+' localhost-only listener. https, not http -- local_server.rs serves TLS
+' with a per-machine certificate cert_manager.rs generates and trusts on
+' first launch (via certutil -user -addstore, no admin rights needed).
+Const PAE_API_URL = "https://127.0.0.1:51823"
+
+' Each call gets its own unique temp files (PID + a random suffix) -- with
+' many formulas potentially evaluating in rapid succession, sharing one
+' fixed set of temp files let concurrent calls clobber each other's
+' payload/result mid-flight (same concurrency bug already fixed once for
+' the Mac version of this macro -- ported here rather than reintroduced).
+'
+' Standardizes on the single /compute route (cmd/arg/expression -> result)
+' the Excel client and PAE Bird's local server both use -- the old
+' per-operation endpoints (/solve, /expand, etc.) belonged to the
+' internet-hosted PAE-API and don't exist on the local server.
+'
+' Windows-specific vs. the Mac version of this macro: temp files live
+' under Environ("TEMP") (backslash paths), the generated script is a
+' plain .bat (no shebang line), and it's run via "cmd.exe /c" rather than
+' invoking bash directly -- curl.exe ships natively in Windows 10 (1803+)
+' and Windows 11's System32, so no separate curl install is required.
+' Reads a file as UTF-8 via LibreOffice's UNO TextInputStream, rather
+' than Basic's plain Open/Line Input (which reads bytes using the
+' system codepage -- confirmed to mangle superscript digits in results,
+' e.g. PAE_DIFFERENTIATE's cubed sign coming back as "Â³" on Windows).
+Function ReadUTF8File(sPath As String) As String
+    Dim oSFA As Object, oStream As Object, oTextStream As Object
+    Dim sContent As String
+    oSFA = createUnoService("com.sun.star.ucb.SimpleFileAccess")
+    Dim sURL As String
+    sURL = ConvertToURL(sPath)
+    If Not oSFA.exists(sURL) Then
+        ReadUTF8File = ""
+        Exit Function
+    End If
+    oStream = oSFA.openFileRead(sURL)
+    oTextStream = createUnoService("com.sun.star.io.TextInputStream")
+    oTextStream.setInputStream(oStream)
+    oTextStream.setEncoding("UTF-8")
+    sContent = ""
+    Do While Not oTextStream.isEOF()
+        sContent = sContent & oTextStream.readLine()
+    Loop
+    oTextStream.closeInput()
+    ReadUTF8File = sContent
+End Function
+
+Function PAECallAPI(sCmd As String, sArg As String, sExpression As String) As String
+    Randomize
+    Dim sTag As String
+    sTag = CStr(Int(Rnd() * 1000000)) & "_" & CStr(Int(Rnd() * 1000000))
+    Dim sTempDir As String
+    sTempDir = Environ("TEMP")
+    If Right(sTempDir, 1) <> "\" Then sTempDir = sTempDir & "\"
+    Dim sPayload As String, sScript As String, sResultFile As String, sLogFile As String
+    sPayload = sTempDir & "pae_payload_" & sTag & ".json"
+    sScript = sTempDir & "pae_call_" & sTag & ".bat"
+    sResultFile = sTempDir & "pae_result_" & sTag & ".json"
+    sLogFile = sTempDir & "pae_log_" & sTag & ".log"
+
+    Dim sJSON As String
+    sJSON = "{""cmd"":""" & sCmd & """,""arg"":""" & sArg & """,""expression"":""" & sExpression & """}"
+
+    ' Build the full script content as one string and write it in a single
+    ' Print call -- two separate Print statements to the same handle left a
+    ' window where a second, concurrent formula evaluation could produce a
+    ' truncated script file on the Mac version of this macro (confirmed
+    ' empirically there) -- same precaution kept here.
+    '
+    ' --ssl-no-revoke: Windows' bundled curl.exe uses Schannel, which by
+    ' default hard-fails a TLS handshake with CRYPT_E_NO_REVOCATION_CHECK
+    ' when it can't reach a CRL/OCSP endpoint to verify a certificate
+    ' hasn't been revoked -- our self-signed local CA has no such
+    ' revocation infrastructure at all (confirmed directly: curl -v
+    ' against the real running server reproduced this exact error, even
+    ' though the same cert loads with zero warning in Edge, which
+    ' evidently soft-fails this same check for a manually-trusted root).
+    ' Bare "curl.exe" relies on PATH resolution -- if LibreOffice spawns
+    ' this process with a different/stripped environment than an
+    ' interactive Explorer double-click (plausible: confirmed the exact
+    ' same .bat content succeeds when double-clicked, but fails silently
+    ' every time when launched via Shell(), even after removing the
+    ' cmd.exe /c wrapper), curl.exe simply wouldn't be found. Use the
+    ' fully-qualified System32 path instead of trusting PATH.
+    Dim sCurlPath As String
+    sCurlPath = Environ("SystemRoot")
+    If sCurlPath = "" Then sCurlPath = "C:\Windows"
+    sCurlPath = sCurlPath & "\System32\curl.exe"
+
+    ' -s alone throws away stderr too, so a failure like "curl.exe not
+    ' found" or a TLS error would previously vanish with zero trace.
+    ' Capture stderr + the exit code to sLogFile so a failure can finally
+    ' be diagnosed instead of guessed at again.
+    Dim sScriptContent As String
+    sScriptContent = "@echo off" & Chr(13) & Chr(10) & _
+        """" & sCurlPath & """ --ssl-no-revoke -s -X POST """ & PAE_API_URL & "/compute"" -H ""Content-Type: application/json"" --data @""" & sPayload & """ -o """ & sResultFile & """ 2>""" & sLogFile & """" & Chr(13) & Chr(10) & _
+        "echo exitcode=%errorlevel% >> """ & sLogFile & """"
+
+    Dim iFile As Integer
+    iFile = FreeFile()
+    Open sPayload For Output As #iFile
+    Print #iFile, sJSON
+    Close #iFile
+
+    iFile = FreeFile()
+    Open sScript For Output As #iFile
+    Print #iFile, sScriptContent
+    Close #iFile
+
+    ' Proven directly: double-clicking this exact .bat file in Explorer
+    ' works instantly and returns the correct result -- Explorer launches
+    ' it straight via its .bat file association, NOT through an explicit
+    ' "cmd.exe /c" wrapper. An earlier version of this Sub used
+    ' Shell "cmd.exe", 1, "/c """ & sScript & """", True instead, which
+    ' consistently failed to produce a result file even though the .bat's
+    ' own content is correct -- LibreOffice Basic's Shell() apparently
+    ' quotes/tokenizes the Param string differently than a real shell,
+    ' corrupting that extra "/c ""..."" " wrapping. Shelling the .bat
+    ' directly as Pathname sidesteps that wrapper entirely and matches
+    ' exactly what the working manual double-click does.
+    Shell sScript, 1, "", True
+
+    ' LibreOffice Basic's Shell(..., bSync:=True) has proven unreliable
+    ' here at actually blocking until a cmd.exe-launched external process
+    ' finishes -- confirmed directly: the exact same curl command,
+    ' generated the exact same way, succeeds immediately when run as a
+    ' standalone .bat file, but this macro was still finding no result
+    ' file right after Shell returned. Poll for the result file instead
+    ' of trusting bSync alone, up to a real timeout (curl itself usually
+    ' completes in well under a second against localhost).
+    Dim nWaited As Integer
+    nWaited = 0
+    Do While Not FileExists(sResultFile) And nWaited < 100
+        Wait 100
+        nWaited = nWaited + 1
+    Loop
+
+    ' Plain Open/Line Input reads bytes using the system codepage, but
+    ' curl writes the result JSON as UTF-8 -- confirmed directly: results
+    ' containing superscript digits (e.g. x-cubed from PAE_DIFFERENTIATE)
+    ' came back as mojibake ("Â³" instead of "³"), the classic symptom of
+    ' UTF-8 bytes read as Latin-1/CP1252. Read via UNO's TextInputStream
+    ' with an explicit UTF-8 encoding instead.
+    Dim sResult As String
+    If FileExists(sResultFile) Then sResult = ReadUTF8File(sResultFile)
+
+    ' DEBUG BUILD: keep the generated files on failure instead of always
+    ' deleting them, so the exact .bat/.json content that ran can be
+    ' inspected directly -- confirmed the standalone equivalent works
+    ' when run manually, but the macro-generated version was still
+    ' failing even after the polling-wait fix, so something about what
+    ' THIS macro actually generates needs to be seen directly rather than
+    ' guessed at again.
+    If sResult = "" Then
+        Dim sLog As String
+        sLog = ""
+        If FileExists(sLogFile) Then sLog = ReadUTF8File(sLogFile)
+        If sLog = "" Then sLog = "(no log file -- " & sScript & " may not have run at all)"
+        PAECallAPI = "Error: couldn't reach PAE Bird -- nWaited=" & nWaited & " -- log: " & sLog
+        Exit Function
+    End If
+
+    If FileExists(sPayload) Then Kill sPayload
+    If FileExists(sScript) Then Kill sScript
+    If FileExists(sResultFile) Then Kill sResultFile
+    If FileExists(sLogFile) Then Kill sLogFile
+
+    Dim n As Long, e As Long
+    n = InStr(sResult, """result"":""")
+    If n > 0 Then
+        n = n + 10
+        e = InStr(n, sResult, """")
+        If e > n Then : PAECallAPI = Mid(sResult, n, e - n) : Exit Function : End If
+    End If
+    PAECallAPI = "Error: " & sResult
+End Function
+
+Function PAECompute(sCmd As String, sArg As String, sExpression As String) As String
+    PAECompute = PAECallAPI(sCmd, sArg, sExpression)
+End Function
+
+Function PAE_SOLVE(expression As String) As String
+    PAE_SOLVE = PAECompute("solve", "", expression)
+End Function
+
+Function PAE_EXPAND(expression As String) As String
+    PAE_EXPAND = PAECompute("expand", "", expression)
+End Function
+
+Function PAE_FACTOR(expression As String) As String
+    PAE_FACTOR = PAECompute("factor", "", expression)
+End Function
+
+Function PAE_DIFFERENTIATE(expression As String, Optional variable As String) As String
+    If IsMissing(variable) Then variable = "x"
+    PAE_DIFFERENTIATE = PAECompute("differentiate", variable, expression)
+End Function
+
+Function PAE_INTEGRATE(expression As String, Optional variable As String) As String
+    If IsMissing(variable) Then variable = "x"
+    PAE_INTEGRATE = PAECompute("integrate", variable, expression)
+End Function
+
+Function PAE_SOLVEEXP(expression As String) As String
+    PAE_SOLVEEXP = PAECompute("solveexp", "", expression)
+End Function
+
+Function PAE_SOLVELOG(expression As String) As String
+    PAE_SOLVELOG = PAECompute("solvelog", "", expression)
+End Function
+
+Function PAE_RADICAL(expression As String) As String
+    PAE_RADICAL = PAECompute("radical", "", expression)
+End Function
+
+Function PAE_RATIONAL(expression As String) As String
+    PAE_RATIONAL = PAECompute("rational", "", expression)
+End Function
+
+Function PAE_TRIG(expression As String) As String
+    PAE_TRIG = PAECompute("trig", "", expression)
+End Function
+
+Function PAE_CONIC(expression As String) As String
+    PAE_CONIC = PAECompute("conic", "", expression)
+End Function
+
+Function PAE_DOMAIN(expression As String) As String
+    PAE_DOMAIN = PAECompute("domain", "", expression)
+End Function
+
+Function PAE_RANGE(expression As String) As String
+    PAE_RANGE = PAECompute("range", "", expression)
+End Function
+
+Function PAE_COMPOSE(expression As String) As String
+    PAE_COMPOSE = PAECompute("compose", "", expression)
+End Function
+
+Function PAE_INVERSE(expression As String) As String
+    PAE_INVERSE = PAECompute("inverse", "", expression)
+End Function
+
+Function PAE_SYSTEM(expression As String) As String
+    PAE_SYSTEM = PAECompute("system", "", expression)
+End Function
+
+Function PAE_INEQUALITY(expression As String) As String
+    PAE_INEQUALITY = PAECompute("inequality", "", expression)
+End Function
+
+Function PAE_EXPANDC(expression As String) As String
+    PAE_EXPANDC = PAECompute("expandc", "", expression)
+End Function
+
+Function PAE_LOGTOEXP(expression As String) As String
+    PAE_LOGTOEXP = PAECompute("logtoexp", "", expression)
+End Function
+
+Function PAE_EXPTOLOG(expression As String) As String
+    PAE_EXPTOLOG = PAECompute("exptolog", "", expression)
+End Function
+
+Function PAE_ROTATE(expression As String) As String
+    PAE_ROTATE = PAECompute("rotate", "", expression)
+End Function
+
+Function PAE_FLIP(expression As String) As String
+    PAE_FLIP = PAECompute("flip", "", expression)
+End Function
+
+Function PAE_DEGTORAD(expression As String) As String
+    PAE_DEGTORAD = PAECompute("degtorad", "", expression)
+End Function
+
+Function PAE_RADTODEG(expression As String) As String
+    PAE_RADTODEG = PAECompute("radtodeg", "", expression)
+End Function
+
+Function PAE_SQRT(expression As String) As String
+    PAE_SQRT = PAECompute("sqrt", "", expression)
+End Function
+
+Function PAE_SCI(expression As String) As String
+    PAE_SCI = PAECompute("sci", "", expression)
+End Function
+
+Function PAE_BALANCE(expression As String) As String
+    PAE_BALANCE = PAECompute("balance", "", expression)
+End Function
+
+Function PAE_OXSTATE(expression As String) As String
+    PAE_OXSTATE = PAECompute("oxstate", "", expression)
+End Function
+
+Function PAE_CANON(expression As String) As String
+    PAE_CANON = PAECompute("canon", "", expression)
+End Function
+
+Function PAE_FACTORIAL(expression As String) As String
+    PAE_FACTORIAL = PAECompute("expand", "", expression)
+End Function
+
+Function PAEToBracket(vRange As Variant) As String
+    Dim s As String
+    Dim i As Integer, j As Integer
+    s = "["
+    For i = LBound(vRange, 1) To UBound(vRange, 1)
+        If i > LBound(vRange, 1) Then s = s & ","
+        s = s & "["
+        For j = LBound(vRange, 2) To UBound(vRange, 2)
+            If j > LBound(vRange, 2) Then s = s & ","
+            s = s & vRange(i, j)
+        Next j
+        s = s & "]"
+    Next i
+    s = s & "]"
+    PAEToBracket = s
+End Function
+
+' Parses "[[1,2],[3,4]]" into a real 2D array so matrix results spill into
+' their own grid of cells (as an array formula) instead of one cell holding
+' the raw bracket text. Cells stay as strings (not numbers) so fractions
+' like "3/2" display exactly as the engine returned them, rather than Calc
+' reinterpreting them as dates.
+Function PAEParseBracket(sBracket As String) As Variant
+    Dim sInner As String
+    Dim aRows() As String
+    Dim aCells() As String
+    Dim result() As String
+    Dim i As Integer, j As Integer
+    Dim nRows As Integer, nCols As Integer
+
+    sInner = Mid(sBracket, 3, Len(sBracket) - 4)
+    aRows = Split(sInner, "],[")
+    nRows = UBound(aRows) - LBound(aRows) + 1
+    aCells = Split(aRows(0), ",")
+    nCols = UBound(aCells) - LBound(aCells) + 1
+
+    ReDim result(nRows - 1, nCols - 1)
+    For i = 0 To nRows - 1
+        aCells = Split(aRows(i), ",")
+        For j = 0 To nCols - 1
+            result(i, j) = aCells(j)
+        Next j
+    Next i
+    PAEParseBracket = result
+End Function
+
+' Matrix results are either a bracket-notation matrix (spill into a real
+' grid) or an "Error: ..." string (return as-is, a scalar) -- matches the
+' engine's own 3-way result shape (matrix.scm's formatMatrixOpResult).
+Function PAEMatrixResult(sResult As String) As Variant
+    If Left(sResult, 2) = "[[" Then
+        PAEMatrixResult = PAEParseBracket(sResult)
+    Else
+        PAEMatrixResult = sResult
+    End If
+End Function
+
+Function PAE_MATRIXADD(a As Variant, b As Variant) As Variant
+    PAE_MATRIXADD = PAEMatrixResult(PAECompute("expand", "", PAEToBracket(a) & "+" & PAEToBracket(b)))
+End Function
+
+Function PAE_MATRIXSUBTRACT(a As Variant, b As Variant) As Variant
+    PAE_MATRIXSUBTRACT = PAEMatrixResult(PAECompute("expand", "", PAEToBracket(a) & "-" & PAEToBracket(b)))
+End Function
+
+Function PAE_MATRIXMULTIPLY(a As Variant, b As Variant) As Variant
+    PAE_MATRIXMULTIPLY = PAEMatrixResult(PAECompute("expand", "", PAEToBracket(a) & "*" & PAEToBracket(b)))
+End Function
+
+Function PAE_MATRIXSCALARMULTIPLY(k As Double, a As Variant) As Variant
+    PAE_MATRIXSCALARMULTIPLY = PAEMatrixResult(PAECompute("expand", "", CStr(k) & "*" & PAEToBracket(a)))
+End Function
+
+Function PAE_MATRIXTRANSPOSE(a As Variant) As Variant
+    PAE_MATRIXTRANSPOSE = PAEMatrixResult(PAECompute("expand", "", "transpose(" & PAEToBracket(a) & ")"))
+End Function
+
+Function PAE_MATRIXDET(a As Variant) As String
+    PAE_MATRIXDET = PAECompute("expand", "", "det(" & PAEToBracket(a) & ")")
+End Function
+
+Function PAE_MATRIXINVERSE(a As Variant) As Variant
+    PAE_MATRIXINVERSE = PAEMatrixResult(PAECompute("expand", "", "inverse(" & PAEToBracket(a) & ")"))
+End Function
+
+Function PAE_MATRIXRREF(a As Variant) As Variant
+    PAE_MATRIXRREF = PAEMatrixResult(PAECompute("expand", "", "rref(" & PAEToBracket(a) & ")"))
+End Function
+
+Sub ShowPaeBirdSettings()
+    MsgBox "PAE Bird runs entirely on this PC now -- no account or API key needed." & Chr(13) & Chr(13) & _
+           "Just keep the PAE Bird app open while using this spreadsheet.", 64, "PAE Bird"
+End Sub
+]]></script:module>
