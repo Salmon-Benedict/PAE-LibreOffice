@@ -1,4 +1,3 @@
-import os
 import json
 import urllib.request
 import urllib.error
@@ -6,43 +5,38 @@ import unohelper
 
 from com.sun.star.sheet import XAddIn
 
-FREE_API_KEY = "pae-free-public-2026"
-API_URL = "https://pae-api-production.up.railway.app"
-UPGRADE_URL = "https://paebird.com/register.html"
+# Served LOCALLY by PAE Bird.app now (see PolySwift/Poly/Poly/LocalServer.
+# swift), not the internet -- no API key needed for a localhost-only
+# listener. Existing already-installed copies of this add-in (the old,
+# internet-based build) are unaffected -- LibreOffice extensions don't
+# self-update, so this only changes what a fresh .oxt install gets.
+# https, not http -- LocalServer.swift serves TLS with a per-machine
+# certificate CertificateManager.swift generates and trusts on first
+# launch (needed so browser-hosted callers aren't blocked as Mixed
+# Content; urllib here isn't itself affected, but the contract is shared
+# with functions.ts/taskpane.ts, which are).
+API_URL = "https://127.0.0.1:51823"
 
-def _config_path():
-    config_dir = os.path.join(os.path.expanduser("~"), ".config", "paebird")
-    os.makedirs(config_dir, exist_ok=True)
-    return os.path.join(config_dir, "key.txt")
-
-def _get_api_key():
-    try:
-        with open(_config_path(), "r") as f:
-            key = f.read().strip()
-            if key:
-                return key
-    except OSError:
-        pass
-    return FREE_API_KEY
-
-def _call_api(endpoint, payload):
-    key = _get_api_key()
+# Standardizes on the same general /compute route (cmd/arg/expression ->
+# result) PAE Bird.app's local server and Excel's client both use, rather
+# than PAE-API's separate /solve, /expand, /factor, etc. legacy routes --
+# those exist there only for older callers' backward compatibility; the
+# local server doesn't carry that burden, so one route is simpler to keep
+# in sync than six.
+def _call_api(cmd, expression, variable=None):
+    payload = {"cmd": cmd, "arg": variable or "", "expression": expression}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        f"{API_URL}/{endpoint}",
+        f"{API_URL}/compute",
         data=data,
-        headers={"Content-Type": "application/json", "x-api-key": key},
+        headers={"Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read())
             return body.get("result", "Error: no result")
-    except urllib.error.HTTPError as e:
-        if e.code == 429:
-            return f"Free tier limit reached — upgrade at {UPGRADE_URL}"
-        if e.code == 401:
-            return "Error: invalid API key — check Tools > PAE Bird Settings"
-        return f"Error: HTTP {e.code}"
+    except urllib.error.URLError:
+        return "Error: couldn't reach PAE Bird -- make sure the PAE Bird app is open on this Mac."
     except Exception as e:
         return f"Error: {e}"
 
@@ -91,19 +85,19 @@ class PaeBirdAddin(unohelper.Base, XAddIn):
 
     # Calc functions
     def PAE_SOLVE(self, expression):
-        return _call_api("solve", {"expression": expression})
+        return _call_api("solve", expression)
 
     def PAE_EXPAND(self, expression):
-        return _call_api("expand", {"expression": expression})
+        return _call_api("expand", expression)
 
     def PAE_FACTOR(self, expression):
-        return _call_api("factor", {"expression": expression})
+        return _call_api("factor", expression)
 
     def PAE_DIFFERENTIATE(self, expression, variable):
-        return _call_api("differentiate", {"expression": expression, "variable": variable})
+        return _call_api("differentiate", expression, variable)
 
     def PAE_INTEGRATE(self, expression, variable):
-        return _call_api("integrate", {"expression": expression, "variable": variable})
+        return _call_api("integrate", expression, variable)
 
 
 def createInstance(ctx):

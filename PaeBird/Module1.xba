@@ -1,26 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
 <script:module xmlns:script="http://openoffice.org/2000/script" script:name="Module1" script:language="StarBasic"><![CDATA[
-Const PAE_API_URL = "https://pae-api-production.up.railway.app"
-Const PAE_FREE_KEY = "pae-free-public-2026"
+' Served LOCALLY by PAE Bird.app now (see PolySwift/Poly/Poly/LocalServer.
+' swift), not the internet -- no API key needed for a localhost-only
+' listener. Existing already-installed copies of this add-in (the old,
+' internet-based build) are unaffected -- LibreOffice extensions don't
+' self-update, so this only changes what a fresh .oxt install gets.
+' https, not http -- LocalServer.swift serves TLS with a per-machine
+' certificate CertificateManager.swift generates and trusts on first
+' launch (curl here needs that trust in place, or -k would be needed).
+Const PAE_API_URL = "https://127.0.0.1:51823"
 
-Function PAEGetKey() As String
-    Dim sPath As String
-    sPath = Environ("HOME") & "/.config/paebird/key.txt"
-    If FileExists(sPath) Then
-        Dim iFile As Integer
-        Dim sKey As String
-        iFile = FreeFile()
-        Open sPath For Input As #iFile
-        Line Input #iFile, sKey
-        Close #iFile
-        sKey = Trim(sKey)
-        If sKey <> "" Then : PAEGetKey = sKey : Exit Function : End If
-    End If
-    PAEGetKey = PAE_FREE_KEY
-End Function
-
-Function PAECallAPI(sEndpoint As String, sJSON As String) As String
+' Standardizes on the same general /compute route (cmd/arg/expression ->
+' result) the Python UNO add-in (pae_bird.py) and Excel's client both use,
+' rather than PAE-API's separate /solve, /expand, /factor, etc. legacy
+' routes -- those exist there only for older callers' backward
+' compatibility; the local server doesn't carry that burden.
+Function PAECallAPI(sCmd As String, sExpression As String, Optional sArg As String) As String
+    If IsMissing(sArg) Then sArg = ""
+    Dim sJSON As String
+    sJSON = "{""cmd"":""" & sCmd & """,""arg"":""" & sArg & """,""expression"":""" & sExpression & """}"
     Dim iFile As Integer
     iFile = FreeFile()
     Open "/tmp/pae_payload.json" For Output As #iFile
@@ -29,7 +28,7 @@ Function PAECallAPI(sEndpoint As String, sJSON As String) As String
     iFile = FreeFile()
     Open "/tmp/pae_call.sh" For Output As #iFile
     Print #iFile, "#!/bin/bash"
-    Print #iFile, "/usr/bin/curl -s -X POST '" & PAE_API_URL & "/" & sEndpoint & "' -H 'Content-Type: application/json' -H 'x-api-key: " & PAEGetKey() & "' --data @/tmp/pae_payload.json -o /tmp/pae_result.json"
+    Print #iFile, "/usr/bin/curl -s -X POST '" & PAE_API_URL & "/compute' -H 'Content-Type: application/json' --data @/tmp/pae_payload.json -o /tmp/pae_result.json"
     Close #iFile
     Shell "/bin/bash", 1, "/tmp/pae_call.sh", True
     Dim sLine As String, sResult As String
@@ -47,71 +46,37 @@ Function PAECallAPI(sEndpoint As String, sJSON As String) As String
         e = InStr(n, sResult, """")
         If e > n Then : PAECallAPI = Mid(sResult, n, e - n) : Exit Function : End If
     End If
-    PAECallAPI = "Error: " & sResult
+    If sResult = "" Then
+        PAECallAPI = "Error: couldn't reach PAE Bird -- make sure the PAE Bird app is open on this Mac."
+    Else
+        PAECallAPI = "Error: " & sResult
+    End If
 End Function
 
 Function PAE_SOLVE(expression As String) As String
-    PAE_SOLVE = PAECallAPI("solve", "{""expression"":""" & expression & """}")
+    PAE_SOLVE = PAECallAPI("solve", expression)
 End Function
 
 Function PAE_EXPAND(expression As String) As String
-    PAE_EXPAND = PAECallAPI("expand", "{""expression"":""" & expression & """}")
+    PAE_EXPAND = PAECallAPI("expand", expression)
 End Function
 
 Function PAE_FACTOR(expression As String) As String
-    PAE_FACTOR = PAECallAPI("factor", "{""expression"":""" & expression & """}")
+    PAE_FACTOR = PAECallAPI("factor", expression)
 End Function
 
 Function PAE_DIFFERENTIATE(expression As String, Optional variable As String) As String
     If IsMissing(variable) Then variable = "x"
-    PAE_DIFFERENTIATE = PAECallAPI("differentiate", "{""expression"":""" & expression & """,""variable"":""" & variable & """}")
+    PAE_DIFFERENTIATE = PAECallAPI("differentiate", expression, variable)
 End Function
 
 Function PAE_INTEGRATE(expression As String, Optional variable As String) As String
     If IsMissing(variable) Then variable = "x"
-    PAE_INTEGRATE = PAECallAPI("integrate", "{""expression"":""" & expression & """,""variable"":""" & variable & """}")
+    PAE_INTEGRATE = PAECallAPI("integrate", expression, variable)
 End Function
 
 Sub ShowPaeBirdSettings()
-    Dim sConfigDir As String
-    Dim sConfigFile As String
-    Dim sCurrentKey As String
-    Dim sNewKey As String
-    Dim iFile As Integer
-    sConfigDir = Environ("HOME") & "/.config/paebird"
-    sConfigFile = sConfigDir & "/key.txt"
-    sCurrentKey = ""
-    On Error GoTo ReadFailed
-    iFile = FreeFile()
-    Open sConfigFile For Input As #iFile
-    Line Input #iFile, sCurrentKey
-    Close #iFile
-    sCurrentKey = Trim(sCurrentKey)
-    ReadFailed:
-    On Error GoTo 0
-    Dim sPrompt As String
-    If sCurrentKey = "" Or sCurrentKey = PAE_FREE_KEY Then
-        sPrompt = "You are using the free tier (50 operations/day)." & Chr(13) & Chr(13) & _
-                  "Paste your paid API key below, or visit:" & Chr(13) & _
-                  "https://paebird.com/register.html" & Chr(13) & Chr(13) & _
-                  "Leave blank to keep using the free tier."
-    Else
-        sPrompt = "Current key: " & Left(sCurrentKey, 8) & "..." & Chr(13) & Chr(13) & _
-                  "Paste a new key to replace it, or leave blank to keep the current key."
-    End If
-    sNewKey = InputBox(sPrompt, "PAE Bird Settings")
-    If IsNull(sNewKey) Or IsEmpty(sNewKey) Then Exit Sub
-    sNewKey = Trim(sNewKey)
-    If Dir(sConfigDir, 16) = "" Then MkDir sConfigDir
-    If sNewKey = "" Then
-        Kill sConfigFile
-        MsgBox "Reverted to free tier.", 64, "PAE Bird"
-        Exit Sub
-    End If
-    iFile = FreeFile()
-    Open sConfigFile For Output As #iFile
-    Print #iFile, sNewKey
-    Close #iFile
-    MsgBox "API key saved. Reload your spreadsheet for it to take effect.", 64, "PAE Bird"
+    MsgBox "PAE Bird runs entirely on this Mac now -- no account or API key needed." & Chr(13) & Chr(13) & _
+           "Just keep the PAE Bird app open while using this spreadsheet.", 64, "PAE Bird"
 End Sub
 ]]></script:module>
