@@ -57,11 +57,12 @@ Function PAECallAPI(sCmd As String, sArg As String, sExpression As String) As St
     Dim sTempDir As String
     sTempDir = Environ("TEMP")
     If Right(sTempDir, 1) <> "\" Then sTempDir = sTempDir & "\"
-    Dim sPayload As String, sScript As String, sResultFile As String, sLogFile As String
+    Dim sPayload As String, sScript As String, sResultFile As String, sLogFile As String, sVbsScript As String
     sPayload = sTempDir & "pae_payload_" & sTag & ".json"
     sScript = sTempDir & "pae_call_" & sTag & ".bat"
     sResultFile = sTempDir & "pae_result_" & sTag & ".json"
     sLogFile = sTempDir & "pae_log_" & sTag & ".log"
+    sVbsScript = sTempDir & "pae_run_" & sTag & ".vbs"
 
     Dim sJSON As String
     sJSON = "{""cmd"":""" & sCmd & """,""arg"":""" & sArg & """,""expression"":""" & sExpression & """}"
@@ -112,18 +113,28 @@ Function PAECallAPI(sCmd As String, sArg As String, sExpression As String) As St
     Print #iFile, sScriptContent
     Close #iFile
 
-    ' Proven directly: double-clicking this exact .bat file in Explorer
-    ' works instantly and returns the correct result -- Explorer launches
-    ' it straight via its .bat file association, NOT through an explicit
-    ' "cmd.exe /c" wrapper. An earlier version of this Sub used
-    ' Shell "cmd.exe", 1, "/c """ & sScript & """", True instead, which
-    ' consistently failed to produce a result file even though the .bat's
-    ' own content is correct -- LibreOffice Basic's Shell() apparently
-    ' quotes/tokenizes the Param string differently than a real shell,
-    ' corrupting that extra "/c ""..."" " wrapping. Shelling the .bat
-    ' directly as Pathname sidesteps that wrapper entirely and matches
-    ' exactly what the working manual double-click does.
-    Shell sScript, 1, "", True
+    ' Neither Shelling the .bat directly nor wrapping it in an explicit
+    ' "cmd.exe /c" reliably honored Basic's own WindowStyle hint -- both
+    ' still popped a visible console per formula call on real hardware,
+    ' a well-known limitation of Basic/VBA's Shell() on Windows. The
+    ' standard, actually-reliable workaround: route through a tiny
+    ' generated VBScript using WScript.Shell.Run's own window-style
+    ' parameter instead. wscript.exe is a GUI-subsystem process (it
+    ' never allocates a console for itself at all), and Run()'s hide
+    ' flag is honored consistently even for a launched .bat file --
+    ' this exact pattern is the textbook fix for "hide a batch file's
+    ' window," used precisely because Shell()-style APIs aren't
+    ' trustworthy for this.
+    Dim sVbsContent As String
+    sVbsContent = "Set objShell = CreateObject(""WScript.Shell"")" & Chr(13) & Chr(10) & _
+        "objShell.Run " & Chr(34) & sScript & Chr(34) & ", 0, True"
+
+    iFile = FreeFile()
+    Open sVbsScript For Output As #iFile
+    Print #iFile, sVbsContent
+    Close #iFile
+
+    Shell "wscript.exe", 0, Chr(34) & sVbsScript & Chr(34), True
 
     ' LibreOffice Basic's Shell(..., bSync:=True) has proven unreliable
     ' here at actually blocking until a cmd.exe-launched external process
@@ -169,6 +180,7 @@ Function PAECallAPI(sCmd As String, sArg As String, sExpression As String) As St
     If FileExists(sScript) Then Kill sScript
     If FileExists(sResultFile) Then Kill sResultFile
     If FileExists(sLogFile) Then Kill sLogFile
+    If FileExists(sVbsScript) Then Kill sVbsScript
 
     Dim n As Long, e As Long
     n = InStr(sResult, """result"":""")
